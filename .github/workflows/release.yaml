@@ -14,11 +14,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  release-charts:
-    name: Release Charts
+  release:
+    name: Release
     runs-on: ubuntu-latest
-    outputs:
-      chart_version: ${{ steps.chart_info.outputs.version }}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
     - name: Get Chart Info
       id: chart_info
       run: |
-        VERSION=$(grep '^version:' ClusterSecret/charts/cluster-secret/Chart.yaml | awk '{print $2}')
+        VERSION=$(grep '^version:' charts/cluster-secret/Chart.yaml | awk '{print $2}')
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Configure Git
@@ -36,117 +38,92 @@ jobs:
         git config user.name "$GITHUB_ACTOR"
         git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-    - name: Run chart-releaser
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+
+    - name: Package Helm Chart
+      run: |
+        mkdir -p .cr-release-packages
+        helm package charts/cluster-secret --destination .cr-release-packages
+
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ steps.chart_info.outputs.version }}
+      run: |
+        gh release create "$VERSION" .cr-release-packages/*.tgz --title "Release $VERSION" --notes "Automated release for version $VERSION"
+
+    - name: Update Helm Repo Index
       uses: helm/chart-releaser-action@v1.6.0
+      with:
+        skip_packaging: true
+        skip_upload: true
       env:
         CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-  build-amd64:
-    name: Build amd64
-    needs: release-charts
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # --- Image Builds ---
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.IMAGE_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build Image (amd64)
+      id: build_image_amd64
+      uses: redhat-actions/buildah-build@main
+      with:
+        image: ${{ env.IMAGE_NAME }}
+        tags: ${{ steps.chart_info.outputs.version }}-amd64 latest-amd64
+        platforms: linux/amd64
+        containerfiles: |
+          ./Dockerfile.gh
 
-      - name: Build Image (amd64)
-        id: build_image
-        uses: redhat-actions/buildah-build@main
-        with:
-          image: ${{ env.IMAGE_NAME }}
-          tags: ${{ needs.release-charts.outputs.chart_version }}-amd64 latest-amd64
-          platforms: linux/amd64
-          containerfiles: |
-            ./Dockerfile.gh
+    - name: Push to GHCR (amd64)
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        image: ${{ steps.build_image_amd64.outputs.image }}
+        tags: ${{ steps.build_image_amd64.outputs.tags }}
+        registry: ${{ env.IMAGE_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push To GHCR
-        uses: redhat-actions/push-to-registry@v2
-        with:
-          image: ${{ steps.build_image.outputs.image }}
-          tags: ${{ steps.build_image.outputs.tags }}
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install qemu dependency
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-user-static
 
-  build-arm64:
-    name: Build arm64
-    needs: release-charts
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Build Image (arm64)
+      id: build_image_arm64
+      uses: redhat-actions/buildah-build@main
+      with:
+        image: ${{ env.IMAGE_NAME }}
+        tags: ${{ steps.chart_info.outputs.version }}-arm64 latest-arm64
+        platforms: linux/arm64/v8
+        containerfiles: |
+          ./Dockerfile.gh
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Push to GHCR (arm64)
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        image: ${{ steps.build_image_arm64.outputs.image }}
+        tags: ${{ steps.build_image_arm64.outputs.tags }}
+        registry: ${{ env.IMAGE_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install qemu dependency
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+    - name: Create and push manifest
+      env:
+        VERSION: ${{ steps.chart_info.outputs.version }}
+      run: |
+        docker manifest create \
+          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} \
+          --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}-amd64 \
+          --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}-arm64
+        docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
 
-      - name: Build Image (arm64)
-        id: build_image
-        uses: redhat-actions/buildah-build@main
-        with:
-          image: ${{ env.IMAGE_NAME }}
-          tags: ${{ needs.release-charts.outputs.chart_version }}-arm64 latest-arm64
-          platforms: linux/arm64/v8
-          containerfiles: |
-            ./Dockerfile.gh
-
-      - name: Push To GHCR
-        uses: redhat-actions/push-to-registry@v2
-        with:
-          image: ${{ steps.build_image.outputs.image }}
-          tags: ${{ steps.build_image.outputs.tags }}
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-  manifest:
-    name: Create manifest and push
-    runs-on: ubuntu-24.04
-    needs: [release-charts, build-amd64, build-arm64]
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create and push manifest (tag)
-        run: |
-          docker manifest create \
-            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }} \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}-amd64 \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}-arm64
-          docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}
-
-      - name: Create and push manifest (latest)
-        run: |
-          docker manifest create \
-            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
-          docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        docker manifest create \
+          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
+          --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
+        docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
