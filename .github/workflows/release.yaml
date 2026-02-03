@@ -1,18 +1,49 @@
-# Docker build images on tag (amd64 + arm64 in parallel, then manifest)
-name: Build&Push Images
+name: Release Charts and Images
+
 on:
   push:
-    tags:
-      - '*'
+    branches:
+    - master
+    paths:
+    - 'charts/**'
+    - 'src/**'
+    - 'Dockerfile*'
 
 env:
-  IMAGE_TAGS: ${{ github.ref_name }}
   IMAGE_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  release-charts:
+    name: Release Charts
+    runs-on: ubuntu-latest
+    outputs:
+      chart_version: ${{ steps.chart_info.outputs.version }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get Chart Info
+      id: chart_info
+      run: |
+        VERSION=$(grep '^version:' ClusterSecret/charts/cluster-secret/Chart.yaml | awk '{print $2}')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Configure Git
+      run: |
+        git config user.name "$GITHUB_ACTOR"
+        git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+    - name: Run chart-releaser
+      uses: helm/chart-releaser-action@v1.6.0
+      env:
+        CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
   build-amd64:
     name: Build amd64
+    needs: release-charts
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -33,7 +64,7 @@ jobs:
         uses: redhat-actions/buildah-build@main
         with:
           image: ${{ env.IMAGE_NAME }}
-          tags: ${{ env.IMAGE_TAGS }}-amd64 latest-amd64
+          tags: ${{ needs.release-charts.outputs.chart_version }}-amd64 latest-amd64
           platforms: linux/amd64
           containerfiles: |
             ./Dockerfile.gh
@@ -49,6 +80,7 @@ jobs:
 
   build-arm64:
     name: Build arm64
+    needs: release-charts
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -74,7 +106,7 @@ jobs:
         uses: redhat-actions/buildah-build@main
         with:
           image: ${{ env.IMAGE_NAME }}
-          tags: ${{ env.IMAGE_TAGS }}-arm64 latest-arm64
+          tags: ${{ needs.release-charts.outputs.chart_version }}-arm64 latest-arm64
           platforms: linux/arm64/v8
           containerfiles: |
             ./Dockerfile.gh
@@ -91,7 +123,7 @@ jobs:
   manifest:
     name: Create manifest and push
     runs-on: ubuntu-24.04
-    needs: [build-amd64, build-arm64]
+    needs: [release-charts, build-amd64, build-arm64]
     permissions:
       contents: read
       packages: write
@@ -106,10 +138,10 @@ jobs:
       - name: Create and push manifest (tag)
         run: |
           docker manifest create \
-            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAGS }} \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAGS }}-amd64 \
-            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAGS }}-arm64
-          docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAGS }}
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }} \
+            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}-amd64 \
+            --amend ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}-arm64
+          docker manifest push ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-charts.outputs.chart_version }}
 
       - name: Create and push manifest (latest)
         run: |
