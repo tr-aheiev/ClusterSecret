@@ -3,8 +3,26 @@ IMG_NAME = clustersecret
 IMG_FQNAME = $(IMG_NAMESPACE)/$(IMG_NAME)
 IMG_VERSION = 0.0.13
 
-.PHONY: container push clean 
+.PHONY: container push clean test-build-amd64 test-build-386 test-build-quick test-build-all
 all: container
+
+# --- Local test builds (use Dockerfile.gh; Docker caches layers so repeats are fast) ---
+# Tip: avoid 'docker build --no-cache'; then apt/pip layers reuse cache and only code changes rebuild.
+# Quick: native amd64 only
+test-build-amd64:
+	docker build --platform linux/amd64 -f Dockerfile.gh -t $(IMG_FQNAME):test-amd64 .
+
+# Slow arch that used to fail (i386); run when you change deps or Dockerfile
+test-build-386:
+	docker build --platform linux/386 -f Dockerfile.gh -t $(IMG_FQNAME):test-386 .
+
+# All platforms used in CI (long; use for pre-push check)
+test-build-all:
+	docker build --platform linux/amd64 -f Dockerfile.gh -t $(IMG_FQNAME):test-amd64 .
+	docker build --platform linux/386 -f Dockerfile.gh -t $(IMG_FQNAME):test-386 .
+	docker build --platform linux/arm64/v8 -f Dockerfile.gh -t $(IMG_FQNAME):test-arm64 .
+	docker build --platform linux/s390x -f Dockerfile.gh -t $(IMG_FQNAME):test-s390x .
+	docker build --platform linux/arm/v7 -f Dockerfile-others.gh -t $(IMG_FQNAME):test-armv7 .
 
 build:
 	uname | grep "Darwin" && podman machine start
