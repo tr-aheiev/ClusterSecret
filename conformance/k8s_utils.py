@@ -66,6 +66,8 @@ class ClusterSecretManager:
         self.retry_attempts = 3
         self.retry_delay = 5
         self.before_validate_delay = 3
+        self.created_secrets: List[Dict[str, str]] = []
+        self.created_cluster_secrets: List[str] = []
 
     def create_secret(
             self,
@@ -86,6 +88,7 @@ class ClusterSecretManager:
                 data=data,
             ),
         )
+        self.created_secrets.append({"name": name, "namespace": namespace})
 
     @staticmethod
     def _generate_secret_key_ref_dict(secret_key_ref: Dict[str, str]) -> Dict[str, Any]:
@@ -117,7 +120,7 @@ class ClusterSecretManager:
         if data is None and secret_key_ref is None:
             raise Exception('You need to either define data or secret_key_ref.')
 
-        return self.custom_objects_api.create_cluster_custom_object(
+        res = self.custom_objects_api.create_cluster_custom_object(
             group="clustersecret.io",
             version="v1",
             body={
@@ -130,6 +133,8 @@ class ClusterSecretManager:
             },
             plural="clustersecrets",
         )
+        self.created_cluster_secrets.append(name)
+        return res
 
     def update_data_cluster_secret(
             self,
@@ -162,6 +167,8 @@ class ClusterSecretManager:
             version="v1",
             plural="clustersecrets",
         )
+        if name in self.created_cluster_secrets:
+            self.created_cluster_secrets.remove(name)
 
     def get_kubernetes_secret(self, name: str, namespace: str) -> Optional[V1Secret]:
         try:
@@ -259,9 +266,25 @@ class ClusterSecretManager:
             retry -= 1
 
         if err is not None:
-            print(f"Retry attempts exhausted. Last error: {err}")
+            print(f"\nRetry attempts exhausted. Last error: {err}")
         return False
 
     def cleanup(self):
-        # TODO: cleanup all secrets and cluster secrets created.
-        pass
+        for secret in self.created_secrets:
+            try:
+                self.api_instance.delete_namespaced_secret(secret["name"], secret["namespace"])
+                print(f"\nDeleted secret {secret['name']} from namespace {secret['namespace']}")
+            except ApiException as e:
+                if e.status != 404:
+                    print(f"\nError deleting secret {secret['name']} from namespace {secret['namespace']}: {e}")
+
+        for name in self.created_cluster_secrets:
+            try:
+                self.delete_cluster_secret(name)
+                print(f"\nDeleted cluster secret {name}")
+            except ApiException as e:
+                if e.status != 404:
+                    print(f"\nError deleting cluster secret {name}: {e}")
+
+        self.created_secrets = []
+        self.created_cluster_secrets = []

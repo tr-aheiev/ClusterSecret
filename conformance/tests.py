@@ -47,6 +47,18 @@ class ClusterSecretCases(unittest.TestCase):
 
         super().setUpClass()
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        print(f"\n")
+        for namespace_name in USER_NAMESPACES:
+            try:
+                api_instance.delete_namespace(namespace_name)
+                print(f"Namespace '{namespace_name}' deleted successfully.")
+            except client.rest.ApiException as e:
+                if e.status != 404:
+                    print(f"\nError deleting namespace '{namespace_name}': {e}")
+        super().tearDownClass()
+
     def test_running(self):
         pods = api_instance.list_namespaced_pod(namespace=CLUSTER_SECRET_NAMESPACE)
         self.assertEqual(len(pods.items), 1)
@@ -306,12 +318,8 @@ class ClusterSecretCases(unittest.TestCase):
         annotations = {
             'custom-annotation': 'example',
         }
-        cluster_secret_manager = ClusterSecretManager(
-            custom_objects_api=custom_objects_api,
-            api_instance=api_instance
-        )
 
-        cluster_secret_manager.create_cluster_secret(
+        self.cluster_secret_manager.create_cluster_secret(
             name=name,
             data={"username": username_data},
             annotations=annotations,
@@ -319,7 +327,7 @@ class ClusterSecretCases(unittest.TestCase):
 
         # We expect the secret to be in ALL namespaces
         self.assertTrue(
-            cluster_secret_manager.validate_namespace_secrets(
+            self.cluster_secret_manager.validate_namespace_secrets(
                 name=name,
                 data={"username": username_data},
                 annotations=annotations
