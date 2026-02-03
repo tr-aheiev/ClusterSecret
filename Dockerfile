@@ -1,5 +1,5 @@
 ARG ARCH=""
-FROM ${ARCH}python:3.9-slim
+FROM ${ARCH}python:3.11-slim
 ADD /src /src
 RUN apt update && apt install -y build-essential
 RUN pip install -r /src/requirements.txt

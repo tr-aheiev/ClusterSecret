@@ -1,7 +1,7 @@
 imagePullSecrets: []
 image:
   repository: ghcr.io/tr-aheiev/clustersecret
-  tag: 0.0.14
+  tag: v2.0.3
   # use tag-alt for ARM and other alternative builds - read the readme for more information
 
 # If Clustersecret is about to create a secret and then it founds it exists:
