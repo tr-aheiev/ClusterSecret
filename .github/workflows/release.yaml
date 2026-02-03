@@ -20,7 +20,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-      id-token: write
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -38,26 +37,11 @@ jobs:
         git config user.name "$GITHUB_ACTOR"
         git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-    - name: Install Helm
-      uses: azure/setup-helm@v4
-
-    - name: Package Helm Chart
-      run: |
-        mkdir -p .cr-release-packages
-        helm package charts/cluster-secret --destination .cr-release-packages
-
-    - name: Create GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        VERSION: ${{ steps.chart_info.outputs.version }}
-      run: |
-        gh release create "$VERSION" .cr-release-packages/*.tgz --title "Release $VERSION" --notes "Automated release for version $VERSION"
-
-    - name: Update Helm Repo Index
-      uses: helm/chart-releaser-action@v1.6.0
+    - name: Run chart-releaser
+      uses: helm/chart-releaser-action@v1.7.0
       with:
-        skip_packaging: true
-        skip_upload: true
+        config: cr.yaml
+        charts_dir: charts
       env:
         CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
@@ -71,7 +55,7 @@ jobs:
 
     - name: Build Image (amd64)
       id: build_image_amd64
-      uses: redhat-actions/buildah-build@main
+      uses: redhat-actions/buildah-build@v2
       with:
         image: ${{ env.IMAGE_NAME }}
         tags: ${{ steps.chart_info.outputs.version }}-amd64 latest-amd64
@@ -95,7 +79,7 @@ jobs:
 
     - name: Build Image (arm64)
       id: build_image_arm64
-      uses: redhat-actions/buildah-build@main
+      uses: redhat-actions/buildah-build@v2
       with:
         image: ${{ env.IMAGE_NAME }}
         tags: ${{ steps.chart_info.outputs.version }}-arm64 latest-arm64

@@ -1,0 +1,2 @@
+release-name-template: "{{ .Version }}"
+skip-existing: true
