@@ -1,28 +1,23 @@
 IMG_NAMESPACE = ghcr.io/tr-aheiev
 IMG_NAME = clustersecret
 IMG_FQNAME = $(IMG_NAMESPACE)/$(IMG_NAME)
-IMG_VERSION = 0.0.13
+IMG_VERSION = v2.0.3
 
-.PHONY: container push clean test-build-amd64 test-build-386 test-build-quick test-build-all
+.PHONY: container push clean test-build-amd64 test-build-arm64 test-build-all
 all: container
 
 # --- Local test builds (use Dockerfile.gh; Docker caches layers so repeats are fast) ---
 # Tip: avoid 'docker build --no-cache'; then apt/pip layers reuse cache and only code changes rebuild.
-# Quick: native amd64 only
 test-build-amd64:
 	docker build --platform linux/amd64 -f Dockerfile.gh -t $(IMG_FQNAME):test-amd64 .
 
-# Slow arch that used to fail (i386); run when you change deps or Dockerfile
-test-build-386:
-	docker build --platform linux/386 -f Dockerfile.gh -t $(IMG_FQNAME):test-386 .
+test-build-arm64:
+	docker build --platform linux/arm64/v8 -f Dockerfile.gh -t $(IMG_FQNAME):test-arm64 .
 
-# All platforms used in CI (long; use for pre-push check)
+# Both platforms used in CI (pre-push check)
 test-build-all:
 	docker build --platform linux/amd64 -f Dockerfile.gh -t $(IMG_FQNAME):test-amd64 .
-	docker build --platform linux/386 -f Dockerfile.gh -t $(IMG_FQNAME):test-386 .
 	docker build --platform linux/arm64/v8 -f Dockerfile.gh -t $(IMG_FQNAME):test-arm64 .
-	docker build --platform linux/s390x -f Dockerfile.gh -t $(IMG_FQNAME):test-s390x .
-	docker build --platform linux/arm/v7 -f Dockerfile-others.gh -t $(IMG_FQNAME):test-armv7 .
 
 build:
 	uname | grep "Darwin" && podman machine start
@@ -30,39 +25,29 @@ build:
 
 
 container:
-	for ARCH in i386 amd64 arm32v5 arm32v7 arm64v8 ppc64le s390x; do \
+	for ARCH in amd64 arm64v8; do \
 		sudo docker build -t $(IMG_FQNAME)-$$ARCH:$(IMG_VERSION) -t $(IMG_FQNAME)-$$ARCH:latest --build-arg ARCH=$$ARCH/ .; \
 	done
 
 # not push anymore with this. check the github actions
 push:
-	for ARCH in i386 amd64 arm32v5 arm32v7 arm64v8 ppc64le s390x; do \
+	for ARCH in amd64 arm64v8; do \
 		sudo docker push $(IMG_FQNAME)-$$ARCH:latest; \
 		sudo docker push $(IMG_FQNAME)-$$ARCH:$(IMG_VERSION); \
 	done
 	sudo docker manifest create \
 		$(IMG_FQNAME):latest \
-		--amend $(IMG_FQNAME)-i386:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-amd64:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm32v5:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm32v7:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm64v8:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-ppc64le:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-s390x:$(IMG_VERSION)
+		--amend $(IMG_FQNAME)-amd64:$(IMG_VERSION) \
+		--amend $(IMG_FQNAME)-arm64v8:$(IMG_VERSION)
 	sudo docker manifest push $(IMG_FQNAME):latest
-		sudo docker manifest create \
-		$(IMG_FQNAME):$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-i386:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-amd64:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm32v5:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm32v7:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-arm64v8:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-ppc64le:$(IMG_VERSION)  \
-		--amend $(IMG_FQNAME)-s390x:$(IMG_VERSION)
+	sudo docker manifest create \
+		$(IMG_FQNAME):$(IMG_VERSION) \
+		--amend $(IMG_FQNAME)-amd64:$(IMG_VERSION) \
+		--amend $(IMG_FQNAME)-arm64v8:$(IMG_VERSION)
 	sudo docker manifest push $(IMG_FQNAME):$(IMG_VERSION) 
 
 clean:
-	for ARCH in i386 amd64 arm32v5 arm32v7 arm64v8 ppc64le s390x; do \
+	for ARCH in amd64 arm64v8; do \
 		sudo docker rmi $(IMG_FQNAME)-$$ARCH:latest; \
 		sudo docker rmi $(IMG_FQNAME)-$$ARCH:$(IMG_VERSION); \
 	done
