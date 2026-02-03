@@ -1,5 +1,5 @@
 # ClusterSecret
-![CI](https://github.com/zakkg3/ClusterSecret/workflows/CI/badge.svg) [![Docker Repository on Quay](https://quay.io/repository/clustersecret/clustersecret/status "Docker Repository on Quay")](https://quay.io/repository/clustersecret/clustersecret) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/clustersecret)](https://artifacthub.io/packages/search?repo=clutersecret)[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4283/badge)](https://bestpractices.coreinfrastructure.org/projects/4283) [![License](http://img.shields.io/:license-apache-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0.html) [![Kubernetes - v1.24.15 | v1.25.11 | v1.26.6 | v1.27.3](https://img.shields.io/static/v1?label=Kubernetes&message=v1.24.15+|+v1.25.11+|+v1.26.6+|+v1.27.3&color=2ea44f)](https://)
+![CI](https://github.com/tr-aheiev/ClusterSecret/workflows/Build&Push%20Images/badge.svg) [![Container Repository on GHCR](https://img.shields.io/badge/container-GHCR-blue)](https://github.com/tr-aheiev/ClusterSecret/pkgs/container/ClusterSecret) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/clustersecret)](https://artifacthub.io/packages/search?repo=clutersecret)[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4283/badge)](https://bestpractices.coreinfrastructure.org/projects/4283) [![License](http://img.shields.io/:license-apache-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0.html) [![Kubernetes - v1.24.15 | v1.25.11 | v1.26.6 | v1.27.3](https://img.shields.io/static/v1?label=Kubernetes&message=v1.24.15+|+v1.25.11+|+v1.26.6+|+v1.27.3&color=2ea44f)](https://)
 ---
 
 [*clustersecret.com*](https://clustersecret.com/)
@@ -14,7 +14,7 @@ The clusterSecret operator makes sure all the matching namespaces have the secre
 
 Full documentation is available at [https://clustersecret.com](https://clustersecret.com/)
 
-<img src="https://github.com/zakkg3/ClusterSecret/blob/master/docs/clusterSecret.png" alt="Clustersecret diagram">
+<img src="https://github.com/tr-aheiev/ClusterSecret/blob/master/docs/clusterSecret.png" alt="Clustersecret diagram">
 
 ---
 
@@ -126,7 +126,7 @@ data:
 
 Images are built and pushed on tag ('git tag') with GitHub Actions. You can find them here:
 
-https://quay.io/repository/clustersecret/clustersecret
+https://github.com/tr-aheiev/ClusterSecret/pkgs/container/ClusterSecret
 
 ## Known bugs:
 

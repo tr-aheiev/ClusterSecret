@@ -6,7 +6,7 @@ type: application
 version: 0.7.0
 icon: https://clustersecret.com/assets/csninjasmall.png
 sources:
-- https://github.com/zakkg3/ClusterSecret
+- https://github.com/tr-aheiev/ClusterSecret
 appVersion: "0.0.14"
 maintainers:
 - email: zakkg3@gmail.com

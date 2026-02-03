@@ -1,4 +1,4 @@
-IMG_NAMESPACE = flag5
+IMG_NAMESPACE = ghcr.io/tr-aheiev
 IMG_NAME = clustersecret
 IMG_FQNAME = $(IMG_NAMESPACE)/$(IMG_NAME)
 IMG_VERSION = 0.0.13

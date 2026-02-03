@@ -19,7 +19,7 @@ spec:
         # - name: regcred
         containers:
         - name: clustersecret
-          image: quay.io/clustersecret/clustersecret:0.0.14
+          image: ghcr.io/tr-aheiev/clustersecret:0.0.14
           livenessProbe:
             httpGet:
               path: /healthz

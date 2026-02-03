@@ -1,30 +1,19 @@
-# Docker build images on tag
+# Docker build images on PR
 name: Test Builds Images
 on: [pull_request]
 
 env:
   IMAGE_TAGS: ${{  github.ref_name }}
-  REGISTRY_USER: clustersecret
-  IMAGE_REGISTRY: quay.io
-  IMAGE_NAMESPACE : clustersecret
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-amd64:
     name: Build amd64
     runs-on: ubuntu-24.04
-    # strategy:
-    #   fail-fast: false
-      # matrix:
-        # install_latest: [ true, false ] #ubuntu-20.04 has a good enough podman.
     steps:
-      # Checkout push-to-registry action github repository
-      - name: Checkout Push to Registry action
-        uses: actions/checkout@v2
-
-      # - name: Install latest podman
-      #   if: matrix.install_latest
-      #   run: |
-      #     bash .github/install_latest_podman.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install qemu dependency
         # we need quemu-user-static for builds other archs with buildah
@@ -34,36 +23,21 @@ jobs:
           sudo apt-get install -y qemu-user-static
 
       - name: Build amd64
-        id: build_image386
+        id: build_image_amd64
         uses: redhat-actions/buildah-build@main
         with:
-          image: ${{ env.IMAGE_NAMESPACE }}
+          image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAGS }}
           platforms: linux/amd64
           containerfiles: |
             ./Dockerfile.gh
 
-      - name: Echo outputs
-        run: |
-          echo "${{ toJSON(steps.push-to-quay.outputs) }}"
-
-
   build-386:
     name: Build 386
     runs-on: ubuntu-24.04
-    # strategy:
-    #   fail-fast: false
-      # matrix:
-        # install_latest: [ true, false ] #ubuntu-20.04 has a good enough podman.
     steps:
-      # Checkout push-to-registry action github repository
-      - name: Checkout Push to Registry action
-        uses: actions/checkout@v2
-
-      # - name: Install latest podman
-      #   if: matrix.install_latest
-      #   run: |
-      #     bash .github/install_latest_podman.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install qemu dependency
         # we need quemu-user-static for builds other archs with buildah
@@ -72,37 +46,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user-static
 
-      - name: Build alt Image 386
-        id: build_image386
+      - name: Build 386
+        id: build_image_386
         uses: redhat-actions/buildah-build@main
         with:
-          image: ${{ env.IMAGE_NAMESPACE }}
+          image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAGS }}
           platforms: linux/386
           containerfiles: |
             ./Dockerfile.gh
 
-      - name: Echo outputs
-        run: |
-          echo "${{ toJSON(steps.push-to-quay.outputs) }}"
-
-
   build-s390:
     name: Builds 390
     runs-on: ubuntu-24.04
-    # strategy:
-    #   fail-fast: false
-      # matrix:
-        # install_latest: [ true, false ] #ubuntu-20.04 has a good enough podman.
     steps:
-      # Checkout push-to-registry action github repository
-      - name: Checkout Push to Registry action
-        uses: actions/checkout@v2
-
-      # - name: Install latest podman
-      #   if: matrix.install_latest
-      #   run: |
-      #     bash .github/install_latest_podman.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install qemu dependency
         # we need quemu-user-static for builds other archs with buildah
@@ -112,37 +71,22 @@ jobs:
           sudo apt-get install -y qemu-user-static
           sudo apt-get install -y rustc
 
-      - name: Build alt Image s390
-        id: build_image390
+      - name: Build s390x
+        id: build_image_s390x
         uses: redhat-actions/buildah-build@main
         with:
-          image: ${{ env.IMAGE_NAMESPACE }}
+          image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAGS }}
           platforms: linux/s390x
           containerfiles: |
             ./Dockerfile.gh
 
-      - name: Echo outputs
-        run: |
-          echo "${{ toJSON(steps.push-to-quay.outputs) }}"
-
-
   build-armv8:
     name: Build armv8
     runs-on: ubuntu-24.04
-    # strategy:
-    #   fail-fast: false
-      # matrix:
-        # install_latest: [ true, false ] #ubuntu-20.04 has a good enough podman.
     steps:
-      # Checkout push-to-registry action github repository
-      - name: Checkout Push to Registry action
-        uses: actions/checkout@v2
-
-      # - name: Install latest podman
-      #   if: matrix.install_latest
-      #   run: |
-      #     bash .github/install_latest_podman.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install qemu dependency
         # we need quemu-user-static for builds other archs with buildah
@@ -152,36 +96,22 @@ jobs:
           sudo apt-get install -y qemu-user-static
           sudo apt-get install -y rustc
 
-      - name: Build alt Image armv8
-        id: build_alt_imagev8
+      - name: Build arm64v8
+        id: build_image_arm64v8
         uses: redhat-actions/buildah-build@main
         with:
-          image: ${{ env.IMAGE_NAMESPACE }}
+          image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAGS }}
           platforms: linux/arm64/v8
           containerfiles: |
             ./Dockerfile.gh
 
-      - name: Echo outputs
-        run: |
-          echo "${{ toJSON(steps.push-to-quay.outputs) }}"
-
   build-armv7:
-    name: Build armv7 #note it needs build essentials (uses docker-others)
+    name: Build armv7
     runs-on: ubuntu-24.04
-    # strategy:
-    #   fail-fast: false
-      # matrix:
-        # install_latest: [ true, false ] #ubuntu-20.04 has a good enough podman.
     steps:
-      # Checkout push-to-registry action github repository
-      - name: Checkout Push to Registry action
-        uses: actions/checkout@v2
-
-      # - name: Install latest podman
-      #   if: matrix.install_latest
-      #   run: |
-      #     bash .github/install_latest_podman.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install qemu dependency
         # we need quemu-user-static for builds other archs with buildah
@@ -191,16 +121,12 @@ jobs:
           sudo apt-get install -y qemu-user-static
           sudo apt-get install -y rustc
 
-      - name: Build alt Image armv7
-        id: build_alt_imagev7
+      - name: Build armv7
+        id: build_image_armv7
         uses: redhat-actions/buildah-build@main
         with:
-          image: ${{ env.IMAGE_NAMESPACE }}
+          image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAGS }}
           platforms: linux/arm/v7
           containerfiles: |
             ./Dockerfile-others.gh
-
-      - name: Echo outputs
-        run: |
-          echo "${{ toJSON(steps.push-to-quay.outputs) }}"
