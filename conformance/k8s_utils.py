@@ -269,6 +269,30 @@ class ClusterSecretManager:
             print(f"\nRetry attempts exhausted. Last error: {err}")
         return False
 
+    def update_secret(
+            self,
+            name: str,
+            namespace: str,
+            data: Dict[str, Any],
+            labels: Optional[Dict[str, str]] = None,
+            annotations: Optional[Dict[str, str]] = None,
+    ):
+        body = self.get_kubernetes_secret(name, namespace)
+        if body is None:
+            raise Exception(f"Secret {name} in namespace {namespace} not found for update.")
+        
+        body.data = data
+        if labels is not None:
+            body.metadata.labels = labels
+        if annotations is not None:
+            body.metadata.annotations = annotations
+            
+        self.api_instance.replace_namespaced_secret(
+            name=name,
+            namespace=namespace,
+            body=body
+        )
+
     def cleanup(self):
         for secret in self.created_secrets:
             try:

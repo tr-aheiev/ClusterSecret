@@ -334,6 +334,54 @@ class ClusterSecretCases(unittest.TestCase):
             )
         )
 
+    def test_value_from_cluster_secret_updated(self):
+        cluster_secret_name = "value-from-cluster-secret-updated"
+        secret_name = "secret-to-be-updated"
+        
+        username_data = "MTIzNDU2Cg=="
+        updated_username_data = "Nzg5MTAxMTIxMgo="
+
+        # 1. Create a source kubernetes secret
+        self.cluster_secret_manager.create_secret(
+            name=secret_name,
+            namespace=USER_NAMESPACES[0],
+            data={'username': username_data}
+        )
+
+        # 2. Create the cluster secret linked to that source secret
+        self.cluster_secret_manager.create_cluster_secret(
+            name=cluster_secret_name,
+            secret_key_ref={
+                'name': secret_name,
+                'namespace': USER_NAMESPACES[0],
+            },
+        )
+
+        # 3. Ensure it synced correctly initially
+        self.assertTrue(
+            self.cluster_secret_manager.validate_namespace_secrets(
+                name=cluster_secret_name,
+                data={"username": username_data},
+            ),
+            msg=f'Initial sync failed for {cluster_secret_name}'
+        )
+
+        # 4. Update the source secret
+        self.cluster_secret_manager.update_secret(
+            name=secret_name,
+            namespace=USER_NAMESPACES[0],
+            data={'username': updated_username_data}
+        )
+
+        # 5. Ensure the ClusterSecret updated the synced secrets in all namespaces
+        self.assertTrue(
+            self.cluster_secret_manager.validate_namespace_secrets(
+                name=cluster_secret_name,
+                data={"username": updated_username_data},
+            ),
+            msg=f'ClusterSecret {cluster_secret_name} did not update after source secret {secret_name} was changed.'
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
