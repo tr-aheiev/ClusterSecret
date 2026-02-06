@@ -80,7 +80,7 @@ SHA256 637f3be7850a | linux | arm64
 # Using the official helm chart
 
 ```bash
-helm repo add clustersecret https://charts.clustersecret.com/
+helm repo add clustersecret https://tr-aheiev.github.io/ClusterSecret/
 helm install clustersecret clustersecret/cluster-secret --version 2.1.0 -n clustersecret --create-namespace
 ```
 

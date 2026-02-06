@@ -64,6 +64,6 @@ For older kubernes (<1.19) use the image tag "0.0.6" in  yaml/02_deployment.yaml
 ## Install
 
 ```bash
-helm repo add clustersecret https://charts.clustersecret.com/
+helm repo add clustersecret https://tr-aheiev.github.io/ClusterSecret/
 helm install clustersecret clustersecret/cluster-secret --version 2.1.0 -n clustersecret --create-namespace
 ```
