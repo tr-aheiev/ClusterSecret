@@ -228,17 +228,30 @@ async def namespace_watcher(logger: logging.Logger, reason: kopf.Reason, meta: k
             logger.debug(f'There are no changes in the list of namespaces for ClusterSecret: {name}')
 
 @kopf.on.update('', 'v1', 'secrets')
-async def on_secret_update(logger: logging.Logger, name: str, namespace: str, **_):
+def on_secret_update(logger: logging.Logger, name: str, namespace: str, **_):
     """Watch for secret update events
     """
     for cached_cluster_secret in csecs_cache.all_cluster_secret():
         body = cached_cluster_secret.body
-
-        if 'valueFrom' not in body['data']:
+        
+        # Check if this ClusterSecret uses valueFrom
+        data = body.get('data', {})
+        value_from = data.get('valueFrom')
+        if not value_from:
             continue
-        elif name == body['data']['valueFrom']['secretKeyRef']['name'] and namespace == body['data']['valueFrom']['secretKeyRef']['namespace']:
-            logger.info(f'Secret {name} in namespace {namespace}, which linked with ClusterSecret {cached_cluster_secret.name} was changed. Re-syncing')
+            
+        secret_key_ref = value_from.get('secretKeyRef')
+        if not secret_key_ref:
+            continue
+            
+        # Check if the updated secret is the one referenced by this ClusterSecret
+        ref_name = secret_key_ref.get('name')
+        ref_namespace = secret_key_ref.get('namespace')
+        
+        if name == ref_name and namespace == ref_namespace:
+            logger.info(f'Source secret {name} in namespace {namespace} changed. Re-syncing ClusterSecret {cached_cluster_secret.name}')
             for ns in cached_cluster_secret.synced_namespace:
+                logger.debug(f'Re-syncing ClusterSecret {cached_cluster_secret.name} to namespace {ns}')
                 sync_secret(logger, ns, body, v1)
 
 @kopf.on.startup()
