@@ -19,7 +19,7 @@ spec:
         # - name: regcred
         containers:
         - name: clustersecret
-          image: ghcr.io/tr-aheiev/clustersecret:0.0.14
+          image: ghcr.io/tr-aheiev/clustersecret:2.1.0
           livenessProbe:
             httpGet:
               path: /healthz
@@ -27,7 +27,7 @@ spec:
             periodSeconds: 120
           env:
             - name: CLUSTER_SECRET_VERSION
-              value: "v0.0.14"
+              value: "v2.1.0"
             - name: REPLACE_EXISTING
               value: "false"
           resources:

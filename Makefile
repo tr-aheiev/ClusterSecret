@@ -1,7 +1,7 @@
 IMG_NAMESPACE = ghcr.io/tr-aheiev
 IMG_NAME = clustersecret
 IMG_FQNAME = $(IMG_NAMESPACE)/$(IMG_NAME)
-IMG_VERSION = 2.0.6
+IMG_VERSION = 2.1.0
 
 .PHONY: container push clean test-build-amd64 test-build-arm64 test-build-all
 all: container

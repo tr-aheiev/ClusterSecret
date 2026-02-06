@@ -1,5 +1,5 @@
 # ClusterSecret
-![CI](https://github.com/tr-aheiev/ClusterSecret/workflows/Build&Push%20Images/badge.svg) [![Container Repository on GHCR](https://img.shields.io/badge/container-GHCR-blue)](https://github.com/tr-aheiev/ClusterSecret/pkgs/container/ClusterSecret) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/clustersecret)](https://artifacthub.io/packages/search?repo=clutersecret)[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4283/badge)](https://bestpractices.coreinfrastructure.org/projects/4283) [![License](http://img.shields.io/:license-apache-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0.html) [![Kubernetes - v1.24.15 | v1.25.11 | v1.26.6 | v1.27.3](https://img.shields.io/static/v1?label=Kubernetes&message=v1.24.15+|+v1.25.11+|+v1.26.6+|+v1.27.3&color=2ea44f)](https://)
+![CI](https://github.com/tr-aheiev/ClusterSecret/workflows/Build&Push%20Images/badge.svg) [![Container Repository on GHCR](https://img.shields.io/badge/container-GHCR-blue)](https://github.com/tr-aheiev/ClusterSecret/pkgs/container/ClusterSecret) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/clustersecret)](https://artifacthub.io/packages/search?repo=clutersecret)[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4283/badge)](https://bestpractices.coreinfrastructure.org/projects/4283) [![License](http://img.shields.io/:license-apache-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0.html) [![Kubernetes - v1.24.15 | v1.25.11 | v1.26.6 | v1.27.3 | v1.34.1](https://img.shields.io/static/v1?label=Kubernetes&message=v1.24.15+|+v1.25.11+|+v1.26.6+|+v1.27.3+|+v1.34.1&color=2ea44f)](https://)
 ---
 
 [*clustersecret.com*](https://clustersecret.com/)
@@ -65,10 +65,10 @@ If this is helpful, consider supporting the project :)
 
 ## Requirements
 
-Current version `0.0.14` is tested for Kubernetes >= 1.19 up to 1.27.3
+Current version `2.1.0` is tested for Kubernetes >= 1.19 up to 1.34.1
 For older Kubernetes (<1.19) use the image tag `0.0.6` in your helm values file.
 
-architectures available (0.0.14):
+architectures available (2.1.0):
 
 SHA256 ed12e8f3e630 | linux | 386
 SHA256 91b0285f5398 | linux | amd64
@@ -81,7 +81,7 @@ SHA256 637f3be7850a | linux | arm64
 
 ```bash
 helm repo add clustersecret https://charts.clustersecret.com/
-helm install clustersecret clustersecret/cluster-secret --version 0.4.3 -n clustersecret --create-namespace
+helm install clustersecret clustersecret/cluster-secret --version 2.1.0 -n clustersecret --create-namespace
 ```
 
 # with just kubectl
