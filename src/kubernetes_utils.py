@@ -173,7 +173,10 @@ def sync_secret(
     labels = cs_metadata.get('labels', None)
 
     try:
-        v1.read_namespace(name=namespace)
+        ns = v1.read_namespace(name=namespace)
+        if ns.status.phase == 'Terminating':
+            logger.info(f'Namespace {namespace} is terminating. Skipping sync for secret {sec_name}.')
+            return
     except exceptions.ApiException as e:
         logger.debug(f'Namespace {namespace} not found while syncing secret {sec_name}. Never mind on this rare situation it will be handled in other place.')
         if e.status == 404:

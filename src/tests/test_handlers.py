@@ -6,7 +6,7 @@ import unittest
 from kubernetes.client import V1ObjectMeta, V1Secret, ApiException
 from unittest.mock import ANY, Mock, patch
 
-from handlers import create_fn, custom_objects_api, csecs_cache, namespace_watcher, on_field_data, startup_fn
+from handlers import create_fn, custom_objects_api, csecs_cache, namespace_watcher, on_field_data, startup_fn, on_secret_change, on_secret_delete
 from kubernetes_utils import create_secret_metadata
 from models import BaseClusterSecret
 
@@ -278,3 +278,128 @@ class TestClusterSecretHandler(unittest.TestCase):
             csecs_cache.get_cluster_secret("mysecretuid"),
             csec,
         )
+
+    def test_on_secret_change(self):
+        """Must sync changes from source secret to target namespaces.
+        """
+        mock_v1 = Mock()
+        sync_secret_mock = Mock()
+
+        # ClusterSecret using valueFrom
+        csec = BaseClusterSecret(
+            uid="csec-uid",
+            name="csec-name",
+            body={
+                "metadata": {"name": "csec-name", "uid": "csec-uid"},
+                "data": {
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": "source-secret",
+                            "namespace": "source-ns"
+                        }
+                    }
+                },
+                "status": {"create_fn": {"syncedns": ["target-ns"]}}
+            },
+            synced_namespace=["target-ns"],
+        )
+        csecs_cache.set_cluster_secret(csec)
+
+        with patch("handlers.v1", mock_v1), \
+             patch("handlers.sync_secret", sync_secret_mock):
+            on_secret_change(
+                logger=self.logger,
+                name="source-secret",
+                namespace="source-ns"
+            )
+
+        # Should trigger sync for the target namespace
+        sync_secret_mock.assert_called_once_with(
+            self.logger, "target-ns", csec.body, mock_v1
+        )
+
+    def test_on_managed_secret_delete(self):
+        """Must restore deleted managed secrets (self-healing).
+        """
+        mock_v1 = Mock()
+        sync_secret_mock = Mock()
+
+        csec = BaseClusterSecret(
+            uid="csec-uid",
+            name="managed-secret",
+            body={
+                "metadata": {"name": "managed-secret", "uid": "csec-uid"},
+                "data": {"key": "value"},
+                "status": {"create_fn": {"syncedns": ["target-ns"]}}
+            },
+            synced_namespace=["target-ns"],
+        )
+        csecs_cache.set_cluster_secret(csec)
+
+        # Body of the deleted secret
+        deleted_secret_body = {
+            "metadata": {
+                "name": "managed-secret",
+                "namespace": "target-ns",
+                "annotations": {
+                    "clustersecret.io/created-by": "ClusterSecrets"
+                }
+            }
+        }
+
+        with patch("handlers.v1", mock_v1), \
+             patch("handlers.sync_secret", sync_secret_mock):
+            on_secret_delete(
+                logger=self.logger,
+                name="managed-secret",
+                namespace="target-ns",
+                body=deleted_secret_body
+            )
+
+        # Should trigger sync to restore
+        sync_secret_mock.assert_called_once_with(
+            self.logger, "target-ns", csec.body, mock_v1
+        )
+
+    def test_on_source_secret_delete_warning(self):
+        """Must log a warning when a source secret is deleted.
+        """
+        mock_v1 = Mock()
+        logger_mock = Mock()
+
+        csec = BaseClusterSecret(
+            uid="csec-uid",
+            name="csec-name",
+            body={
+                "metadata": {"name": "csec-name", "uid": "csec-uid"},
+                "data": {
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": "source-secret",
+                            "namespace": "source-ns"
+                        }
+                    }
+                }
+            },
+            synced_namespace=["target-ns"],
+        )
+        csecs_cache.set_cluster_secret(csec)
+
+        # Body of the deleted source secret (no our annotations)
+        deleted_secret_body = {
+            "metadata": {
+                "name": "source-secret",
+                "namespace": "source-ns"
+            }
+        }
+
+        on_secret_delete(
+            logger=logger_mock,
+            name="source-secret",
+            namespace="source-ns",
+            body=deleted_secret_body
+        )
+
+        # Should log a warning
+        logger_mock.warning.assert_called()
+        self.assertIn("was deleted!", logger_mock.warning.call_args[0][0])

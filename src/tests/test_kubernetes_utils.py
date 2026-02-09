@@ -8,7 +8,7 @@ from kubernetes.client import V1ObjectMeta
 
 from consts import CREATE_BY_ANNOTATION, LAST_SYNC_ANNOTATION, VERSION_ANNOTATION, BLOCKED_ANNOTATIONS, \
     CREATE_BY_AUTHOR, CLUSTER_SECRET_LABEL
-from kubernetes_utils import get_ns_list, create_secret_metadata
+from kubernetes_utils import get_ns_list, create_secret_metadata, sync_secret
 from os_utils import get_version, get_blocked_labels
 
 USER_NAMESPACE_COUNT = 10
@@ -168,3 +168,32 @@ class TestClusterSecret(unittest.TestCase):
                     expr=validator(value),
                     msg=f'expected base annotation with key {key} is present and its value {value} is as expected'
                 )
+
+    def test_sync_secret_skips_terminating_ns(self):
+        """Must skip sync if namespace is Terminating.
+        """
+        mock_v1 = Mock()
+        logger_mock = Mock()
+
+        # Mock read_namespace to return a Terminating status
+        mock_ns = Mock()
+        mock_ns.status.phase = 'Terminating'
+        mock_v1.read_namespace.return_value = mock_ns
+
+        body = {
+            'metadata': {'name': 'mysecret'},
+            'data': {'key': 'value'}
+        }
+
+        sync_secret(
+            logger=logger_mock,
+            namespace='terminating-ns',
+            body=body,
+            v1=mock_v1
+        )
+
+        # Should NOT call create or replace secret
+        self.assertFalse(mock_v1.create_namespaced_secret.called)
+        self.assertFalse(mock_v1.replace_namespaced_secret.called)
+        # Should have logged that it's skipping
+        self.assertIn("is terminating. Skipping sync", logger_mock.info.call_args[0][0])

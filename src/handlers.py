@@ -7,6 +7,7 @@ from kubernetes import client, config
 
 from cache import Cache, MemoryCache
 from kubernetes_utils import delete_secret, get_ns_list, sync_secret, patch_clustersecret_status, get_custom_objects_by_kind
+from consts import CREATE_BY_ANNOTATION, CREATE_BY_AUTHOR
 from models import BaseClusterSecret
 
 # In-memory dictionary for all ClusterSecrets in the Cluster. UID -> ClusterSecret Body
@@ -227,9 +228,10 @@ async def namespace_watcher(logger: logging.Logger, reason: kopf.Reason, meta: k
         else:
             logger.debug(f'There are no changes in the list of namespaces for ClusterSecret: {name}')
 
+@kopf.on.create('', 'v1', 'secrets')
 @kopf.on.update('', 'v1', 'secrets')
-def on_secret_update(logger: logging.Logger, name: str, namespace: str, **_):
-    """Watch for secret update events
+def on_secret_change(logger: logging.Logger, name: str, namespace: str, **_):
+    """Watch for secret create/update events
     """
     for cached_cluster_secret in csecs_cache.all_cluster_secret():
         body = cached_cluster_secret.body
@@ -244,7 +246,7 @@ def on_secret_update(logger: logging.Logger, name: str, namespace: str, **_):
         if not secret_key_ref:
             continue
             
-        # Check if the updated secret is the one referenced by this ClusterSecret
+        # Check if the changed secret is the one referenced by this ClusterSecret
         ref_name = secret_key_ref.get('name')
         ref_namespace = secret_key_ref.get('namespace')
         
@@ -253,6 +255,29 @@ def on_secret_update(logger: logging.Logger, name: str, namespace: str, **_):
             for ns in cached_cluster_secret.synced_namespace:
                 logger.debug(f'Re-syncing ClusterSecret {cached_cluster_secret.name} to namespace {ns}')
                 sync_secret(logger, ns, body, v1)
+
+@kopf.on.delete('', 'v1', 'secrets')
+def on_secret_delete(logger: logging.Logger, name: str, namespace: str, body: Dict[str, Any], **_):
+    """Watch for secret deletion events
+    """
+    # 1. Handle downstream managed secret deletion (Self-healing)
+    annotations = body.get('metadata', {}).get('annotations', {})
+    if annotations.get(CREATE_BY_ANNOTATION) == CREATE_BY_AUTHOR:
+        for cached_cluster_secret in csecs_cache.all_cluster_secret():
+            if cached_cluster_secret.name == name and namespace in cached_cluster_secret.synced_namespace:
+                logger.info(f'Managed secret {name} deleted from namespace {namespace}. Re-syncing to restore.')
+                sync_secret(logger, namespace, cached_cluster_secret.body, v1)
+                return
+
+    # 2. Handle source secret deletion (Only warning)
+    for cached_cluster_secret in csecs_cache.all_cluster_secret():
+        csec_body = cached_cluster_secret.body
+        data = csec_body.get('data', {})
+        value_from = data.get('valueFrom', {})
+        secret_key_ref = value_from.get('secretKeyRef', {})
+        
+        if secret_key_ref.get('name') == name and secret_key_ref.get('namespace') == namespace:
+            logger.warning(f'Source secret {name} in namespace {namespace} was deleted! ClusterSecret {cached_cluster_secret.name} is now stale.')
 
 @kopf.on.startup()
 async def startup_fn(logger: logging.Logger, **_):
