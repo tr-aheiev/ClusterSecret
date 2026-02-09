@@ -208,20 +208,20 @@ async def namespace_watcher(logger: logging.Logger, reason: kopf.Reason, meta: k
     ns_name = meta.name
     logger.info(f'Namespace {"created" if reason == "create" else "deleted"}: {ns_name}. Re-syncing')
     
-    ns_list_new = []
+    # Fetch all namespaces once to avoid N API calls
+    try:
+        all_namespaces = [ns.metadata.name for ns in v1.list_namespace().items]
+    except exceptions.ApiException as e:
+        logger.error(f'Error listing namespaces: {e}')
+        return
+
     for cached_cluster_secret in csecs_cache.all_cluster_secret():
-        # Reconstruct a minimal body for get_ns_list and sync_secret
-        body = {
-            'metadata': cached_cluster_secret.metadata,
-            'data': cached_cluster_secret.data,
-            'type': cached_cluster_secret.type,
-            'matchNamespace': cached_cluster_secret.match_namespace,
-            'avoidNamespaces': cached_cluster_secret.avoid_namespaces,
-        }
-        
+        body = cached_cluster_secret.kubernetes_body
         name = cached_cluster_secret.name
         ns_list_synced = cached_cluster_secret.synced_namespace
-        ns_list_new = get_ns_list(logger, body, v1)
+        
+        # Use the pre-fetched namespace list
+        ns_list_new = get_ns_list(logger, body, v1, nss=all_namespaces)
         ns_list_changed = False
 
         logger.debug(f'ClusterSecret: {name}. Old matched namespaces: {ns_list_synced}')
@@ -301,11 +301,7 @@ def on_secret_event(event, logger: logging.Logger, **_):
     if event_type in ['ADDED', 'MODIFIED']:
         for csec in source_for_csecs:
             logger.info(f'Source secret {name} in namespace {namespace} changed. Re-syncing ClusterSecret {csec.name}')
-            body = {
-                'metadata': csec.metadata,
-                'data': csec.data,
-                'type': csec.type
-            }
+            body = csec.kubernetes_body
             for ns in csec.synced_namespace:
                 logger.debug(f'Re-syncing ClusterSecret {csec.name} to namespace {ns}')
                 sync_secret(logger, ns, body, v1)
@@ -328,11 +324,7 @@ def on_secret_event(event, logger: logging.Logger, **_):
                         logger.error(f'Error checking namespace status: {e}')
 
                     logger.info(f'Managed secret {name} deleted from namespace {namespace}. Re-syncing to restore.')
-                    body = {
-                        'metadata': cached_cluster_secret.metadata,
-                        'data': cached_cluster_secret.data,
-                        'type': cached_cluster_secret.type
-                    }
+                    body = cached_cluster_secret.kubernetes_body
                     sync_secret(logger, namespace, body, v1)
                     return
         

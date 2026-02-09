@@ -329,11 +329,8 @@ class TestClusterSecretHandler(unittest.TestCase):
             )
 
         # Should trigger sync for the target namespace
-        expected_body = {
-            'metadata': csec.metadata,
-            'data': csec.data,
-            'type': csec.type
-        }
+        # Handler uses kubernetes_body which includes all fields
+        expected_body = csec.kubernetes_body
         sync_secret_mock.assert_called_once_with(
             self.logger, "target-ns", expected_body, mock_v1
         )
@@ -379,11 +376,7 @@ class TestClusterSecretHandler(unittest.TestCase):
             )
 
         # Should trigger sync to restore
-        expected_body = {
-            'metadata': csec.metadata,
-            'data': csec.data,
-            'type': csec.type
-        }
+        expected_body = csec.kubernetes_body
         sync_secret_mock.assert_called_once_with(
             self.logger, "target-ns", expected_body, mock_v1
         )

@@ -49,8 +49,10 @@ def get_ns_list(
         logger: logging.Logger,
         body: Dict[str, Any],
         v1: CoreV1Api,
+        nss: Optional[List[str]] = None,
 ) -> List[str]:
-    """Returns a list of namespaces where the secret should be matched
+    """Returns a list of namespaces where the secret should be matched.
+    If 'nss' is provided, it uses that list instead of querying the API.
     """
     # Get matchNamespace or default to all
     match_namespace = body.get('matchNamespace')
@@ -60,8 +62,10 @@ def get_ns_list(
     # Get avoidNamespaces or default to None
     avoid_namespaces = body.get('avoidNamespaces')
 
-    # Collect all namespaces names
-    nss = [ns.metadata.name for ns in v1.list_namespace().items]
+    # Collect all namespaces names if not provided
+    if nss is None:
+        nss = [ns.metadata.name for ns in v1.list_namespace().items]
+    
     matched_ns = []
     avoided_ns = []
 
