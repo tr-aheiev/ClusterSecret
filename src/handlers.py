@@ -60,7 +60,6 @@ def on_delete(
 
     syncedns = body.get('status', {}).get('create_fn', {}).get('syncedns', [])
     for ns in syncedns:
-        logger.info(f'deleting secret {name} from namespace {ns}')
         delete_secret(logger, ns, name, v1)
 
 
