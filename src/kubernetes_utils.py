@@ -53,10 +53,12 @@ def get_ns_list(
     """Returns a list of namespaces where the secret should be matched
     """
     # Get matchNamespace or default to all
-    match_namespace = body.get('matchNamespace', ['.*'])
+    match_namespace = body.get('matchNamespace')
+    if match_namespace is None:
+        match_namespace = ['.*']
 
     # Get avoidNamespaces or default to None
-    avoid_namespaces = body.get('avoidNamespaces', None)
+    avoid_namespaces = body.get('avoidNamespaces')
 
     # Collect all namespaces names
     nss = [ns.metadata.name for ns in v1.list_namespace().items]
@@ -96,10 +98,15 @@ def read_data_secret(
         logger.debug(f'Obtained secret {secret}')
         data = secret.data
     except exceptions.ApiException as e:
-        logger.error('Error reading secret')
+        if e.status == 404:
+            logger.warning(f'Source secret {name} in ns {namespace} not found.')
+            # If the source secret is gone, we can't do much. 
+            # We return empty data to avoid infinite retries if that's appropriate,
+            # or raise a permanent error.
+            return {}
+        
+        logger.error(f'Error reading secret {name} in ns {namespace}')
         logger.debug(f'error: {e}')
-        if e == '404':
-            logger.error(f'Secret {name} in ns {namespace} not found.')
         raise kopf.TemporaryError('Error reading secret')
     return data
 

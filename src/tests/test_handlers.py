@@ -6,7 +6,7 @@ import unittest
 from kubernetes.client import V1ObjectMeta, V1Secret, ApiException
 from unittest.mock import ANY, Mock, patch
 
-from handlers import create_fn, custom_objects_api, csecs_cache, namespace_watcher, on_field_data, startup_fn, on_secret_change, on_secret_delete
+from handlers import create_fn, custom_objects_api, csecs_cache, namespace_watcher, on_field_data, startup_fn, on_secret_event
 from kubernetes_utils import create_secret_metadata
 from models import BaseClusterSecret
 
@@ -26,7 +26,8 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="mysecretuid",
             name="mysecret",
-            body={"metadata": {"name": "mysecret", "uid": "mysecretuid"}, "data": {"key": "oldvalue"}},
+            metadata={"name": "mysecret", "uid": "mysecretuid"},
+            data={"key": "oldvalue"},
             synced_namespace=[],
         )
 
@@ -48,7 +49,7 @@ class TestClusterSecretHandler(unittest.TestCase):
 
         # New data should be in the cache.
         self.assertEqual(
-            csecs_cache.get_cluster_secret("mysecretuid").body.get("data"),
+            csecs_cache.get_cluster_secret("mysecretuid").data,
             {"key": "newvalue"},
         )
 
@@ -74,11 +75,11 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="mysecretuid",
             name="mysecret",
-            body={
-                "metadata": {"name": "mysecret", "uid": "mysecretuid"},
-                "data": {"key": "oldvalue"},
-                "status": {"create_fn": {"syncedns": ["myns"]}},
+            metadata={
+                "name": "mysecret", 
+                "uid": "mysecretuid",
             },
+            data={"key": "oldvalue"},
             synced_namespace=["myns"],
         )
 
@@ -170,7 +171,8 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="mysecretuid",
             name="mysecret",
-            body={"metadata": {"name": "mysecret"}, "data": "mydata"},
+            metadata={"name": "mysecret"},
+            data={"key": "mydata"},
             synced_namespace=["default"],
         )
 
@@ -225,7 +227,8 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="mysecretuid",
             name="mysecret",
-            body={"metadata": {"name": "mysecret"}, "data": "mydata"},
+            metadata={"name": "mysecret"},
+            data={"key": "mydata"},
             synced_namespace=["default", "myns"],
         )
 
@@ -264,19 +267,24 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="mysecretuid",
             name="mysecret",
-            body={"metadata": {"name": "mysecret", "uid": "mysecretuid"}, "data": "mydata"},
+            metadata={"name": "mysecret", "uid": "mysecretuid"},
+            data={"key": "mydata"},
             synced_namespace=[],
         )
 
-        get_custom_objects_by_kind.return_value = [csec.body]
+        get_custom_objects_by_kind.return_value = [{
+            "metadata": csec.metadata,
+            "data": csec.data,
+            "status": {"create_fn": {"syncedns": []}}
+        }]
 
         with patch("handlers.get_custom_objects_by_kind", get_custom_objects_by_kind):
             asyncio.run(startup_fn(logger=self.logger))
 
         # The secret should be in the cache.
         self.assertEqual(
-            csecs_cache.get_cluster_secret("mysecretuid"),
-            csec,
+            csecs_cache.get_cluster_secret("mysecretuid").uid,
+            csec.uid,
         )
 
     def test_on_secret_change(self):
@@ -289,33 +297,45 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="csec-uid",
             name="csec-name",
-            body={
-                "metadata": {"name": "csec-name", "uid": "csec-uid"},
-                "data": {
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": "source-secret",
-                            "namespace": "source-ns"
-                        }
+            metadata={"name": "csec-name", "uid": "csec-uid"},
+            data={
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": "source-secret",
+                        "namespace": "source-ns"
                     }
-                },
-                "status": {"create_fn": {"syncedns": ["target-ns"]}}
+                }
             },
             synced_namespace=["target-ns"],
         )
         csecs_cache.set_cluster_secret(csec)
 
+        event = {
+            'type': 'MODIFIED',
+            'object': {
+                'metadata': {
+                    'name': 'source-secret',
+                    'namespace': 'source-ns',
+                    'labels': {}
+                }
+            }
+        }
+
         with patch("handlers.v1", mock_v1), \
              patch("handlers.sync_secret", sync_secret_mock):
-            on_secret_change(
-                logger=self.logger,
-                name="source-secret",
-                namespace="source-ns"
+            on_secret_event(
+                event=event,
+                logger=self.logger
             )
 
         # Should trigger sync for the target namespace
+        expected_body = {
+            'metadata': csec.metadata,
+            'data': csec.data,
+            'type': csec.type
+        }
         sync_secret_mock.assert_called_once_with(
-            self.logger, "target-ns", csec.body, mock_v1
+            self.logger, "target-ns", expected_body, mock_v1
         )
 
     def test_on_managed_secret_delete(self):
@@ -323,42 +343,49 @@ class TestClusterSecretHandler(unittest.TestCase):
         """
         mock_v1 = Mock()
         sync_secret_mock = Mock()
+        from consts import CREATE_BY_ANNOTATION, CREATE_BY_AUTHOR
 
         csec = BaseClusterSecret(
             uid="csec-uid",
             name="managed-secret",
-            body={
-                "metadata": {"name": "managed-secret", "uid": "csec-uid"},
-                "data": {"key": "value"},
-                "status": {"create_fn": {"syncedns": ["target-ns"]}}
-            },
+            metadata={"name": "managed-secret", "uid": "csec-uid"},
+            data={"key": "value"},
             synced_namespace=["target-ns"],
         )
         csecs_cache.set_cluster_secret(csec)
 
-        # Body of the deleted secret
-        deleted_secret_body = {
-            "metadata": {
-                "name": "managed-secret",
-                "namespace": "target-ns",
-                "annotations": {
-                    "clustersecret.io/created-by": "ClusterSecrets"
+        event = {
+            'type': 'DELETED',
+            'object': {
+                'metadata': {
+                    'name': 'managed-secret',
+                    'namespace': 'target-ns',
+                    'annotations': {CREATE_BY_ANNOTATION: CREATE_BY_AUTHOR},
+                    'labels': {}
                 }
             }
         }
 
+        # Mock read_namespace to return non-terminating
+        mock_ns = Mock()
+        mock_ns.status.phase = 'Active'
+        mock_v1.read_namespace.return_value = mock_ns
+
         with patch("handlers.v1", mock_v1), \
              patch("handlers.sync_secret", sync_secret_mock):
-            on_secret_delete(
-                logger=self.logger,
-                name="managed-secret",
-                namespace="target-ns",
-                body=deleted_secret_body
+            on_secret_event(
+                event=event,
+                logger=self.logger
             )
 
         # Should trigger sync to restore
+        expected_body = {
+            'metadata': csec.metadata,
+            'data': csec.data,
+            'type': csec.type
+        }
         sync_secret_mock.assert_called_once_with(
-            self.logger, "target-ns", csec.body, mock_v1
+            self.logger, "target-ns", expected_body, mock_v1
         )
 
     def test_on_source_secret_delete_warning(self):
@@ -370,14 +397,12 @@ class TestClusterSecretHandler(unittest.TestCase):
         csec = BaseClusterSecret(
             uid="csec-uid",
             name="csec-name",
-            body={
-                "metadata": {"name": "csec-name", "uid": "csec-uid"},
-                "data": {
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": "source-secret",
-                            "namespace": "source-ns"
-                        }
+            metadata={"name": "csec-name", "uid": "csec-uid"},
+            data={
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": "source-secret",
+                        "namespace": "source-ns"
                     }
                 }
             },
@@ -385,19 +410,20 @@ class TestClusterSecretHandler(unittest.TestCase):
         )
         csecs_cache.set_cluster_secret(csec)
 
-        # Body of the deleted source secret (no our annotations)
-        deleted_secret_body = {
-            "metadata": {
-                "name": "source-secret",
-                "namespace": "source-ns"
+        event = {
+            'type': 'DELETED',
+            'object': {
+                'metadata': {
+                    'name': 'source-secret',
+                    'namespace': 'source-ns',
+                    'labels': {}
+                }
             }
         }
 
-        on_secret_delete(
-            logger=logger_mock,
-            name="source-secret",
-            namespace="source-ns",
-            body=deleted_secret_body
+        on_secret_event(
+            event=event,
+            logger=logger_mock
         )
 
         # Should log a warning

@@ -1,9 +1,11 @@
 import logging
+import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Mapping
 
 import kopf
 from kubernetes import client, config
+from kubernetes.client import exceptions
 
 from cache import Cache, MemoryCache
 from kubernetes_utils import delete_secret, get_ns_list, sync_secret, patch_clustersecret_status, get_custom_objects_by_kind
@@ -28,6 +30,18 @@ v1 = client.CoreV1Api()
 custom_objects_api = client.CustomObjectsApi()
 
 
+def is_noise_secret(name: str, labels: kopf.Labels) -> bool:
+    """Returns True if the secret is considered 'noise' (Helm, GitLab Runner, etc.)
+    """
+    if name.startswith('sh.helm.release.v1.'):
+        return True
+    if labels.get('owner') == 'helm':
+        return True
+    if re.match(r'^runner-.*-project-.*-concurrent-.*$', name):
+        return True
+    return False
+
+
 @kopf.on.delete('clustersecret.io', 'v1', 'clustersecrets')
 def on_delete(
     body: Dict[str, Any],
@@ -36,18 +50,18 @@ def on_delete(
     logger: logging.Logger,
     **_,
 ):
+    # Delete from memory FIRST to prevent self-healing race
+    try:
+        csecs_cache.remove_cluster_secret(uid)
+        logger.debug(f'csec {uid} deleted from memory ok')
+    except KeyError as k:
+        logger.info(f'This csec was not found in memory, maybe it was created in another run: {k}')
+    logger.debug(f'csec {uid} deleted from memory ok')
+
     syncedns = body.get('status', {}).get('create_fn', {}).get('syncedns', [])
     for ns in syncedns:
         logger.info(f'deleting secret {name} from namespace {ns}')
         delete_secret(logger, ns, name, v1)
-
-    # Delete from memory to prevent syncing with new namespaces
-    try:
-        csecs_cache.remove_cluster_secret(uid)
-    except KeyError as k:
-        logger.info(f'This csec were not found in memory, maybe it was created in another run: {k}')
-        return
-    logger.debug(f'csec {uid} deleted from memory ok')
 
 
 @kopf.on.field('clustersecret.io', 'v1', 'clustersecrets', field='avoidNamespaces')
@@ -91,8 +105,12 @@ def on_fields_avoid_or_match_namespace(
     csecs_cache.set_cluster_secret(BaseClusterSecret(
         uid=uid,
         name=name,
-        body=body,
+        data=body.get('data'),
+        metadata=body.get('metadata'),
         synced_namespace=updated_matched,
+        type=body.get('type', 'Opaque'),
+        match_namespace=body.get('matchNamespace'),
+        avoid_namespaces=body.get('avoidNamespaces'),
     ))
 
     # Patch synced_ns field
@@ -136,8 +154,12 @@ def on_field_data(
     csecs_cache.set_cluster_secret(BaseClusterSecret(
         uid=uid,
         name=name,
-        body=body,
+        data=body.get('data'),
+        metadata=body.get('metadata'),
         synced_namespace=syncedns,
+        type=body.get('type', 'Opaque'),
+        match_namespace=body.get('matchNamespace'),
+        avoid_namespaces=body.get('avoidNamespaces'),
     ))
 
 
@@ -162,8 +184,12 @@ async def create_fn(
     csecs_cache.set_cluster_secret(BaseClusterSecret(
         uid=uid,
         name=name,
-        body=body,
+        data=body.get('data'),
+        metadata=body.get('metadata'),
         synced_namespace=matchedns,
+        type=body.get('type', 'Opaque'),
+        match_namespace=body.get('matchNamespace'),
+        avoid_namespaces=body.get('avoidNamespaces'),
     ))
 
     # This return is mandatory! It's used to update the status of the CRD
@@ -185,7 +211,15 @@ async def namespace_watcher(logger: logging.Logger, reason: kopf.Reason, meta: k
     
     ns_list_new = []
     for cached_cluster_secret in csecs_cache.all_cluster_secret():
-        body = cached_cluster_secret.body
+        # Reconstruct a minimal body for get_ns_list and sync_secret
+        body = {
+            'metadata': cached_cluster_secret.metadata,
+            'data': cached_cluster_secret.data,
+            'type': cached_cluster_secret.type,
+            'matchNamespace': cached_cluster_secret.match_namespace,
+            'avoidNamespaces': cached_cluster_secret.avoid_namespaces,
+        }
+        
         name = cached_cluster_secret.name
         ns_list_synced = cached_cluster_secret.synced_namespace
         ns_list_new = get_ns_list(logger, body, v1)
@@ -228,56 +262,83 @@ async def namespace_watcher(logger: logging.Logger, reason: kopf.Reason, meta: k
         else:
             logger.debug(f'There are no changes in the list of namespaces for ClusterSecret: {name}')
 
-@kopf.on.create('', 'v1', 'secrets')
-@kopf.on.update('', 'v1', 'secrets')
-def on_secret_change(logger: logging.Logger, name: str, namespace: str, **_):
-    """Watch for secret create/update events
+@kopf.on.event('', 'v1', 'secrets')
+def on_secret_event(event, logger: logging.Logger, **_):
+    """Watch for all secret events
     """
+    event_type = event.get('type')
+    obj = event.get('object')
+    if not obj or event_type not in ['ADDED', 'MODIFIED', 'DELETED']:
+        return
+        
+    metadata = obj.get('metadata', {})
+    name = metadata.get('name')
+    namespace = metadata.get('namespace')
+    labels = metadata.get('labels', {})
+    annotations = metadata.get('annotations', {})
+
+    if is_noise_secret(name, labels):
+        return
+
+    # Check if this secret is relevant to any ClusterSecret
+    # A secret is relevant if:
+    # 1. It is managed by us (has our annotation)
+    # 2. It is a source secret (matches name/namespace of any valueFrom)
+    
+    is_managed = annotations.get(CREATE_BY_ANNOTATION) == CREATE_BY_AUTHOR
+    
+    # Pre-calculate if it's a source secret to avoid repeated loops
+    source_for_csecs = []
     for cached_cluster_secret in csecs_cache.all_cluster_secret():
-        body = cached_cluster_secret.body
-        
-        # Check if this ClusterSecret uses valueFrom
-        data = body.get('data', {})
-        value_from = data.get('valueFrom')
-        if not value_from:
-            continue
-            
-        secret_key_ref = value_from.get('secretKeyRef')
-        if not secret_key_ref:
-            continue
-            
-        # Check if the changed secret is the one referenced by this ClusterSecret
-        ref_name = secret_key_ref.get('name')
-        ref_namespace = secret_key_ref.get('namespace')
-        
-        if name == ref_name and namespace == ref_namespace:
-            logger.info(f'Source secret {name} in namespace {namespace} changed. Re-syncing ClusterSecret {cached_cluster_secret.name}')
-            for ns in cached_cluster_secret.synced_namespace:
-                logger.debug(f'Re-syncing ClusterSecret {cached_cluster_secret.name} to namespace {ns}')
+        value_from = cached_cluster_secret.data.get('valueFrom', {})
+        ref = value_from.get('secretKeyRef', {})
+        if ref.get('name') == name and ref.get('namespace') == namespace:
+            source_for_csecs.append(cached_cluster_secret)
+
+    if not is_managed and not source_for_csecs:
+        return
+
+    # 1. Handle Secret Creation or Update (Source Secret tracking)
+    if event_type in ['ADDED', 'MODIFIED']:
+        for csec in source_for_csecs:
+            logger.info(f'Source secret {name} in namespace {namespace} changed. Re-syncing ClusterSecret {csec.name}')
+            body = {
+                'metadata': csec.metadata,
+                'data': csec.data,
+                'type': csec.type
+            }
+            for ns in csec.synced_namespace:
+                logger.debug(f'Re-syncing ClusterSecret {csec.name} to namespace {ns}')
                 sync_secret(logger, ns, body, v1)
 
-@kopf.on.delete('', 'v1', 'secrets')
-def on_secret_delete(logger: logging.Logger, name: str, namespace: str, body: Dict[str, Any], **_):
-    """Watch for secret deletion events
-    """
-    # 1. Handle downstream managed secret deletion (Self-healing)
-    annotations = body.get('metadata', {}).get('annotations', {})
-    if annotations.get(CREATE_BY_ANNOTATION) == CREATE_BY_AUTHOR:
-        for cached_cluster_secret in csecs_cache.all_cluster_secret():
-            if cached_cluster_secret.name == name and namespace in cached_cluster_secret.synced_namespace:
-                logger.info(f'Managed secret {name} deleted from namespace {namespace}. Re-syncing to restore.')
-                sync_secret(logger, namespace, cached_cluster_secret.body, v1)
-                return
+    # 2. Handle Secret Deletion
+    if event_type == 'DELETED':
+        if is_managed:
+            # Self-healing: restore if the ClusterSecret still exists and namespace is not terminating
+            for cached_cluster_secret in csecs_cache.all_cluster_secret():
+                if cached_cluster_secret.name == name and namespace in cached_cluster_secret.synced_namespace:
+                    # Check if namespace is terminating
+                    try:
+                        ns = v1.read_namespace(name=namespace)
+                        if ns.status.phase == 'Terminating':
+                            logger.info(f'Namespace {namespace} is terminating. Skipping self-healing for secret {name}.')
+                            return
+                    except exceptions.ApiException as e:
+                        if e.status == 404:
+                            return
+                        logger.error(f'Error checking namespace status: {e}')
 
-    # 2. Handle source secret deletion (Only warning)
-    for cached_cluster_secret in csecs_cache.all_cluster_secret():
-        csec_body = cached_cluster_secret.body
-        data = csec_body.get('data', {})
-        value_from = data.get('valueFrom', {})
-        secret_key_ref = value_from.get('secretKeyRef', {})
+                    logger.info(f'Managed secret {name} deleted from namespace {namespace}. Re-syncing to restore.')
+                    body = {
+                        'metadata': cached_cluster_secret.metadata,
+                        'data': cached_cluster_secret.data,
+                        'type': cached_cluster_secret.type
+                    }
+                    sync_secret(logger, namespace, body, v1)
+                    return
         
-        if secret_key_ref.get('name') == name and secret_key_ref.get('namespace') == namespace:
-            logger.warning(f'Source secret {name} in namespace {namespace} was deleted! ClusterSecret {cached_cluster_secret.name} is now stale.')
+        for csec in source_for_csecs:
+            logger.warning(f'Source secret {name} in namespace {namespace} was deleted! ClusterSecret {csec.name} is now stale.')
 
 @kopf.on.startup()
 async def startup_fn(logger: logging.Logger, **_):
@@ -304,7 +365,11 @@ async def startup_fn(logger: logging.Logger, **_):
             BaseClusterSecret(
                 uid=metadata.get('uid'),
                 name=metadata.get('name'),
-                body=item,
+                data=item.get('data'),
+                metadata=metadata,
                 synced_namespace=item.get('status', {}).get('create_fn', {}).get('syncedns', []),
+                type=item.get('type', 'Opaque'),
+                match_namespace=item.get('matchNamespace'),
+                avoid_namespaces=item.get('avoidNamespaces'),
             )
         )
